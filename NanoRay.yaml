@@ -1,0 +1,158 @@
+# An unique identifier for the head node and workers of this cluster.
+cluster_name: nanoray
+
+# The maximum number of workers nodes to launch in addition to the head
+# node.
+max_workers: 3
+
+# The autoscaler will scale up the cluster faster with higher upscaling speed.
+# E.g., if the task requires adding more nodes then autoscaler will gradually
+# scale up the cluster in chunks of upscaling_speed*currently_running_nodes.
+# This number should be > 0.
+upscaling_speed: 50
+
+# If a node is idle for this many minutes, it will be removed.
+idle_timeout_minutes: 2
+
+# Cloud-provider specific configuration.
+provider:
+    type: gcp
+    region: us-central1
+    availability_zone: us-central1-f
+    project_id: research-s22 #research-s22 # Globally unique project id
+
+# How Ray will authenticate with newly launched nodes.
+auth:
+    ssh_user: ubuntu
+# By default Ray creates a new private keypair, but you can also use your own.
+# If you do so, make sure to also set "KeyName" in the head and worker node
+# configurations below. This requires that you have added the key into the
+# project wide meta-data.
+#    ssh_private_key: /path/to/your/key.pem
+
+# Tell the autoscaler the allowed node types and the resources they provide.
+# The key is the name of the node type, which is just for debugging purposes.
+# The node config specifies the launch config and physical instance type.
+available_node_types:
+    ray_head_default:
+        # The resources provided by this node type.
+        resources: {"CPU": 4, "head": 1}
+        # Provider-specific config for the head node, e.g. instance type. By default
+        # Ray will auto-configure unspecified fields such as subnets and ssh-keys.
+        # For more documentation on available fields, see:
+        # https://cloud.google.com/compute/docs/reference/rest/v1/instances/insert
+        node_config:
+            machineType: e2-standard-4
+            serviceAccounts:
+            - email: 692680303924-compute@developer.gserviceaccount.com
+              scopes:
+              - https://www.googleapis.com/auth/cloud-platform
+            sourceMachineImage: projects/research-s22/global/machineImages/ray-head-image
+
+    ray_worker_pmdv:
+        min_workers: 0
+        max_workers: 1
+        resources: {"CPU": 12, "GPU": 1, "pmdv": 1, "first": 1}
+        node_config:
+            machineType: custom-12-61440
+            guestAccelerators:
+              - acceleratorType: nvidia-tesla-p100
+                acceleratorCount: 1
+            metadata:
+              items:
+                - key: install-nvidia-driver
+                  value: "True"
+            scheduling:
+              - onHostMaintenance: TERMINATE
+            sourceMachineImage: projects/research-s22/global/machineImages/pmdv-image
+            serviceAccounts:
+              - email: 692680303924-compute@developer.gserviceaccount.com
+                scopes:
+                - https://www.googleapis.com/auth/cloud-platform
+
+    ray_worker_guppymm2:
+        min_workers: 0
+        max_workers: 1
+        resources: {"CPU": 12, "GPU": 1, "guppy-mm2": 1}
+        node_config:
+            machineType: custom-12-76800
+            guestAccelerators:
+              - acceleratorType: nvidia-tesla-v100
+                acceleratorCount: 1
+            metadata:
+              items:
+                - key: install-nvidia-driver
+                  value: "True"
+            scheduling:
+              - onHostMaintenance: TERMINATE
+            sourceMachineImage: projects/research-s22/global/machineImages/guppy-mm2-metrics-image
+            serviceAccounts:
+              - email: 692680303924-compute@developer.gserviceaccount.com
+                scopes:
+                - https://www.googleapis.com/auth/cloud-platform
+    
+    ray_worker_bam-merge:
+        min_workers: 0
+        max_workers: 1
+        resources: {"CPU": 8, "chrbam": 1}
+        node_config:
+            machineType: n1-highmem-8
+            sourceMachineImage: projects/research-s22/global/machineImages/bam-merge-image
+            serviceAccounts:
+              - email: 692680303924-compute@developer.gserviceaccount.com
+                scopes:
+                - https://www.googleapis.com/auth/cloud-platform
+    
+    ray_worker_sniffles:
+        min_workers: 0
+        max_workers: 2
+        resources: {"CPU": 16, "sniffles": 1}
+        node_config:
+            machineType: n1-standard-16
+            sourceMachineImage: projects/research-s22/global/machineImages/sniffles2-image
+            serviceAccounts:
+              - email: 692680303924-compute@developer.gserviceaccount.com
+                scopes:
+                - https://www.googleapis.com/auth/cloud-platform
+
+# Specify the node type of the head node (as configured above).
+head_node_type: ray_head_default
+
+# Files or directories to copy to the head and worker nodes. The format is a
+# dictionary from REMOTE_PATH: LOCAL_PATH, e.g.
+file_mounts: {
+   "~/NanoRay": "/Users/raghavgarg/Desktop/NanoRay",
+#    "/path2/on/remote/machine": "/path2/on/local/machine",
+}
+
+# List of commands that will be run before `setup_commands`. If docker is
+# enabled, these commands will run outside the container and before docker
+# is setup.
+initialization_commands:
+  - export RAY_PROFILING=1
+
+# Custom commands that will be run on the head node after common setup.
+head_setup_commands:
+  - sudo pip install google-api-python-client==1.7.8
+
+# Custom commands that will be run on worker nodes after common setup.
+worker_setup_commands:
+  - bash ~/NanoRay/mount_ssd_nvme.sh
+
+# Command to start ray on the head node. You don't need to change this.
+head_start_ray_commands:
+    - ray stop
+    - >-
+      ray start
+      --head
+      --port=6379
+      --object-manager-port=8076
+      --autoscaling-config=~/ray_bootstrap_config.yaml
+
+# Command to start ray on worker nodes. You don't need to change this.
+worker_start_ray_commands:
+    - ray stop
+    - >-
+      ray start
+      --address=$RAY_HEAD_IP:6379
+      --object-manager-port=8076
